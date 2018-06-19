@@ -18,6 +18,9 @@
  */
 package org.apache.metamodel.hbase;
 
+import static org.junit.Assert.*;
+
+import java.io.IOException;
 import java.util.Arrays;
 
 import org.apache.hadoop.hbase.HColumnDescriptor;
@@ -29,150 +32,135 @@ import org.apache.metamodel.data.DataSet;
 import org.apache.metamodel.schema.ColumnType;
 import org.apache.metamodel.schema.Table;
 import org.apache.metamodel.util.SimpleTableDef;
+import org.junit.Before;
+import org.junit.Test;
 
 public class HBaseDataContextTest extends HBaseTestCase {
 
-    private static final String EXAMPLE_TABLE_NAME = "table_for_junit";
-
-    private HBaseDataContext _dataContext;
-
     @Override
-    protected void setUp() throws Exception {
+    @Before
+    public void setUp() throws Exception {
         super.setUp();
-        if (isConfigured()) {
-            final String zookeeperHostname = getZookeeperHostname();
-            final int zookeeperPort = getZookeeperPort();
-            final HBaseConfiguration configuration = new HBaseConfiguration(zookeeperHostname, zookeeperPort,
-                    ColumnType.VARCHAR);
-            _dataContext = new HBaseDataContext(configuration);
-            createTableNatively();
-        }
+        createTableNatively();
     }
 
+    @Test
     public void testCreateInsertQueryAndDrop() throws Exception {
-        if (!isConfigured()) {
-            System.err.println(getInvalidConfigurationMessage());
-            return;
-        }
-
         // test the schema exploration
-        final Table table = _dataContext.getDefaultSchema().getTableByName(EXAMPLE_TABLE_NAME);
+        final Table table = getDataContext().getDefaultSchema().getTableByName(TABLE_NAME);
         assertNotNull(table);
 
-        assertEquals("[_id, bar, foo]", Arrays.toString(table.getColumnNames().toArray()));
-        assertEquals(ColumnType.MAP, table.getColumn(1).getType());
+        assertEquals("[" + HBaseDataContext.FIELD_ID + ", " + CF_BAR + ", " + CF_FOO + "]", Arrays.toString(table
+                .getColumnNames()
+                .toArray()));
+        assertEquals(HBaseColumn.DEFAULT_COLUMN_TYPE_FOR_COLUMN_FAMILIES, table.getColumn(1).getType());
 
         // insert two records
         insertRecordsNatively();
 
         // query using regular configuration
-        final DataSet dataSet1 = _dataContext.query().from(EXAMPLE_TABLE_NAME).selectAll().execute();
-        try {
+        try (final DataSet dataSet1 = getDataContext().query().from(TABLE_NAME).selectAll().execute()) {
             assertTrue(dataSet1.next());
-            assertEquals(
-                    "Row[values=[junit1, {[104, 101, 121]=[121, 111],[104, 105]=[116, 104, 101, 114, 101]}, {[104, 101, 108, 108, 111]=[119, 111, 114, 108, 100]}]]",
-                    dataSet1.getRow().toString());
+            assertEquals("Row[values=[" + RK_1 + ", {" + Q_HEY + "=" + V_YO + "," + Q_HI + "=" + V_THERE + "}, {"
+                    + Q_HELLO + "=" + V_WORLD + "}]]", dataSet1.getRow().toString());
             assertTrue(dataSet1.next());
-            assertEquals("Row[values=[junit2, {[98, 97, 104]=[1, 2, 3],[104, 105]=[121, 111, 117]}, {}]]", dataSet1
-                    .getRow().toString());
+            assertEquals("Row[values=[" + RK_2 + ", {" + Q_BAH + "=" + new String(V_123_BYTE_ARRAY) + "," + Q_HI + "="
+                    + V_YOU + "}, {}]]", dataSet1.getRow().toString());
             assertFalse(dataSet1.next());
-        } finally {
-            dataSet1.close();
         }
 
         // query using custom table definitions
-        final String[] columnNames = new String[] { "foo", "bar:hi", "bar:hey" };
+        final String columnName1 = CF_FOO;
+        final String columnName2 = CF_BAR + ":" + Q_HI;
+        final String columnName3 = CF_BAR + ":" + Q_HEY;
+        final String[] columnNames = new String[] { columnName1, columnName2, columnName3 };
         final ColumnType[] columnTypes = new ColumnType[] { ColumnType.MAP, ColumnType.VARCHAR, ColumnType.VARCHAR };
-        final SimpleTableDef[] tableDefinitions = new SimpleTableDef[] { new SimpleTableDef(EXAMPLE_TABLE_NAME,
-                columnNames, columnTypes) };
-        _dataContext = new HBaseDataContext(new HBaseConfiguration("SCH", getZookeeperHostname(), getZookeeperPort(),
-                tableDefinitions, ColumnType.VARCHAR));
+        final SimpleTableDef[] tableDefinitions = new SimpleTableDef[] { new SimpleTableDef(TABLE_NAME, columnNames,
+                columnTypes) };
+        setDataContext(new HBaseDataContext(new HBaseConfiguration("SCH", getZookeeperHostname(), getZookeeperPort(),
+                tableDefinitions, ColumnType.VARCHAR)));
 
-        final DataSet dataSet2 = _dataContext.query().from(EXAMPLE_TABLE_NAME).select("foo", "bar:hi", "bar:hey")
-                .execute();
-        try {
+        try (final DataSet dataSet2 = getDataContext()
+                .query()
+                .from(TABLE_NAME)
+                .select(columnName1, columnName2, columnName3)
+                .execute()) {
             assertTrue(dataSet2.next());
-            assertEquals("Row[values=[{[104, 101, 108, 108, 111]=[119, 111, 114, 108, 100]}, there, yo]]", dataSet2
-                    .getRow().toString());
+            assertEquals("Row[values=[{" + Q_HELLO + "=" + V_WORLD + "}, " + V_THERE + ", " + V_YO + "]]", dataSet2
+                    .getRow()
+                    .toString());
             assertTrue(dataSet2.next());
-            assertEquals("Row[values=[{}, you, null]]", dataSet2.getRow().toString());
+            assertEquals("Row[values=[{}, " + V_YOU + ", null]]", dataSet2.getRow().toString());
             assertFalse(dataSet2.next());
-        } finally {
-            dataSet2.close();
         }
 
         // query count
-        final DataSet dataSet3 = _dataContext.query().from(EXAMPLE_TABLE_NAME).selectCount().execute();
-        try {
+        try (final DataSet dataSet3 = getDataContext().query().from(TABLE_NAME).selectCount().execute()) {
             assertTrue(dataSet3.next());
-            assertEquals("Row[values=[2]]", dataSet3.getRow().toString());
+            assertEquals("Row[values=[" + NUMBER_OF_ROWS + "]]", dataSet3.getRow().toString());
             assertFalse(dataSet3.next());
-        } finally {
-            dataSet3.close();
         }
 
         // query only id
-        final DataSet dataSet4 = _dataContext.query().from(EXAMPLE_TABLE_NAME).select(HBaseDataContext.FIELD_ID)
-                .execute();
-
-        try {
+        try (final DataSet dataSet4 = getDataContext()
+                .query()
+                .from(TABLE_NAME)
+                .select(HBaseDataContext.FIELD_ID)
+                .execute()) {
             assertTrue(dataSet4.next());
-            assertEquals("Row[values=[junit1]]", dataSet4.getRow().toString());
+            assertEquals("Row[values=[" + RK_1 + "]]", dataSet4.getRow().toString());
             assertTrue(dataSet4.next());
-            assertEquals("Row[values=[junit2]]", dataSet4.getRow().toString());
+            assertEquals("Row[values=[" + RK_2 + "]]", dataSet4.getRow().toString());
             assertFalse(dataSet4.next());
-        } finally {
-            dataSet4.close();
         }
 
         // primary key lookup query - using GET
-        final DataSet dataSet5 = _dataContext.query().from(EXAMPLE_TABLE_NAME).select(HBaseDataContext.FIELD_ID)
-                .where(HBaseDataContext.FIELD_ID).eq("junit1").execute();
-
-        try {
+        try (final DataSet dataSet5 = getDataContext()
+                .query()
+                .from(TABLE_NAME)
+                .select(HBaseDataContext.FIELD_ID)
+                .where(HBaseDataContext.FIELD_ID)
+                .eq(RK_1)
+                .execute()) {
             assertTrue(dataSet5.next());
-            assertEquals("Row[values=[junit1]]", dataSet5.getRow().toString());
+            assertEquals("Row[values=[" + RK_1 + "]]", dataSet5.getRow().toString());
             assertFalse(dataSet5.next());
-        } finally {
-            dataSet5.close();
         }
     }
 
-    private void insertRecordsNatively() throws Exception {
-        final org.apache.hadoop.hbase.client.Table hTable = _dataContext.getHTable(EXAMPLE_TABLE_NAME);
-        try {
-            final Put put1 = new Put("junit1".getBytes());
-            put1.addColumn("foo".getBytes(), "hello".getBytes(), "world".getBytes());
-            put1.addColumn("bar".getBytes(), "hi".getBytes(), "there".getBytes());
-            put1.addColumn("bar".getBytes(), "hey".getBytes(), "yo".getBytes());
+    private void insertRecordsNatively() throws IOException, InterruptedException {
+        try (final org.apache.hadoop.hbase.client.Table hTable = getDataContext().getHTable(TABLE_NAME)) {
+            final Put put1 = new Put(RK_1.getBytes());
+            put1.addColumn(CF_FOO.getBytes(), Q_HELLO.getBytes(), V_WORLD.getBytes());
+            put1.addColumn(CF_BAR.getBytes(), Q_HI.getBytes(), V_THERE.getBytes());
+            put1.addColumn(CF_BAR.getBytes(), Q_HEY.getBytes(), V_YO.getBytes());
 
-            final Put put2 = new Put("junit2".getBytes());
-            put2.addColumn("bar".getBytes(), "bah".getBytes(), new byte[] { 1, 2, 3 });
-            put2.addColumn("bar".getBytes(), "hi".getBytes(), "you".getBytes());
+            final Put put2 = new Put(RK_2.getBytes());
+            put2.addColumn(CF_BAR.getBytes(), Q_BAH.getBytes(), V_123_BYTE_ARRAY);
+            put2.addColumn(CF_BAR.getBytes(), Q_HI.getBytes(), V_YOU.getBytes());
 
-            final Object[] result = new Object[2];
+            final Object[] result = new Object[NUMBER_OF_ROWS];
             hTable.batch(Arrays.asList(put1, put2), result);
-        } finally {
-            hTable.close();
         }
     }
 
-    private void createTableNatively() throws Exception {
-        final TableName tableName = TableName.valueOf(EXAMPLE_TABLE_NAME);
-        
-        // check if the table exists
-        if (_dataContext.getAdmin().isTableAvailable(tableName)) {
-            System.out.println("Unittest table already exists: " + EXAMPLE_TABLE_NAME);
-            // table already exists
-            return;
-        }
+    private void createTableNatively() throws IOException {
+        try (Admin admin = getDataContext().getAdmin()) {
+            final TableName tableName = TableName.valueOf(TABLE_NAME);
 
-        Admin admin = _dataContext.getAdmin();
-        System.out.println("Creating table");
-        final HTableDescriptor tableDescriptor = new HTableDescriptor(tableName);
-        tableDescriptor.addFamily(new HColumnDescriptor("foo".getBytes()));
-        tableDescriptor.addFamily(new HColumnDescriptor("bar".getBytes()));
-        admin.createTable(tableDescriptor);
-        System.out.println("Created table");
+            // Check if the table exists
+            if (admin.isTableAvailable(tableName)) {
+                // table already exists
+                System.out.println("Unittest table already exists: " + TABLE_NAME);
+            } else {
+                // Create table
+                System.out.println("Creating table");
+                final HTableDescriptor tableDescriptor = new HTableDescriptor(tableName);
+                tableDescriptor.addFamily(new HColumnDescriptor(CF_FOO.getBytes()));
+                tableDescriptor.addFamily(new HColumnDescriptor(CF_BAR.getBytes()));
+                admin.createTable(tableDescriptor);
+                System.out.println("Created table");
+            }
+        }
     }
 }

@@ -18,21 +18,56 @@
  */
 package org.apache.metamodel.hbase;
 
+import static org.junit.Assume.assumeTrue;
+
 import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
 import java.util.Properties;
 
-import junit.framework.TestCase;
+import org.apache.metamodel.schema.ColumnType;
+import org.junit.AfterClass;
 
-public abstract class HBaseTestCase extends TestCase {
+/**
+ * Properly configure before executing these tests.
+ * See the {@link HBaseTestCase#setUp()} and {@link HBaseTestCase#getPropertyFilePath()} methods.
+ */
+public abstract class HBaseTestCase {
+
+    // TableName
+    protected static final String TABLE_NAME = "table_for_junit";
+
+    // ColumnFamilies
+    protected static final int NUMBER_OF_CFS = 3; // foo + bar + ID
+    protected static final String CF_FOO = "foo";
+    protected static final String CF_BAR = "bar";
+
+    // Qualifiers
+    protected static final String Q_HELLO = "hello";
+    protected static final String Q_HI = "hi";
+    protected static final String Q_HEY = "hey";
+    protected static final String Q_BAH = "bah";
+
+    // Number of rows
+    protected static final int NUMBER_OF_ROWS = 2;
+
+    // RowKeys
+    protected static final String RK_1 = "junit1";
+    protected static final String RK_2 = "junit2";
+
+    // RowValues
+    protected static final String V_WORLD = "world";
+    protected static final String V_THERE = "there";
+    protected static final String V_YO = "yo";
+    protected static final byte[] V_123_BYTE_ARRAY = new byte[] { 1, 2, 3 };
+    protected static final String V_YOU = "you";
 
     private String zookeeperHostname;
     private int zookeeperPort;
-    private boolean _configured;
-    
-    @Override
+    private static HBaseDataContext _dataContext;
+
     protected void setUp() throws Exception {
-        super.setUp();
+        boolean configured = false;
 
         Properties properties = new Properties();
         File file = new File(getPropertyFilePath());
@@ -43,14 +78,29 @@ public abstract class HBaseTestCase extends TestCase {
             if (zookeeperPortPropertyValue != null && !zookeeperPortPropertyValue.isEmpty()) {
                 zookeeperPort = Integer.parseInt(zookeeperPortPropertyValue);
             }
-            
-            _configured = (zookeeperHostname != null && !zookeeperHostname.isEmpty());
-        } else {
-            _configured = false;
+
+            configured = (zookeeperHostname != null && !zookeeperHostname.isEmpty());
+        }
+        assumeTrue(configured);
+
+        final HBaseConfiguration configuration = new HBaseConfiguration(zookeeperHostname, zookeeperPort,
+                ColumnType.VARCHAR);
+        setDataContext(new HBaseDataContext(configuration));
+    }
+
+    @AfterClass
+    public static void oneTimeTeardown() throws IOException {
+        if (_dataContext != null) {
+            _dataContext.getConnection().close();
         }
     }
-    
-    private String getPropertyFilePath() {
+
+    /**
+     * Gets the test configuration file. An example file can be found at the root folder of this project.
+     * 
+     * @return Location of the configuration file.
+     */
+    protected String getPropertyFilePath() {
         String userHome = System.getProperty("user.home");
         return userHome + "/metamodel-integrationtest-configuration.properties";
     }
@@ -60,15 +110,19 @@ public abstract class HBaseTestCase extends TestCase {
                 + getPropertyFilePath() + "), to run integration tests";
     }
 
-    public boolean isConfigured() {
-        return _configured;
-    }
-    
     public String getZookeeperHostname() {
         return zookeeperHostname;
     }
 
     public int getZookeeperPort() {
         return zookeeperPort;
+    }
+
+    public HBaseDataContext getDataContext() {
+        return _dataContext;
+    }
+
+    public void setDataContext(HBaseDataContext dataContext) {
+        HBaseTestCase._dataContext = dataContext;
     }
 }

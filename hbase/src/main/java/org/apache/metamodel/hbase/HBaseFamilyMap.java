@@ -18,11 +18,12 @@
  */
 package org.apache.metamodel.hbase;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
+
+import org.apache.hadoop.hbase.util.Bytes;
 
 public class HBaseFamilyMap implements Map<Object, Object> {
 
@@ -106,9 +107,9 @@ public class HBaseFamilyMap implements Map<Object, Object> {
             if (sb.length() > 1) {
                 sb.append(',');
             }
-            sb.append(Arrays.toString(entry.getKey()));
+            sb.append(Bytes.toString(entry.getKey()));
             sb.append('=');
-            sb.append(Arrays.toString(entry.getValue()));
+            sb.append(Bytes.toString(entry.getValue()));
         }
         sb.append('}');
         return sb.toString();
